@@ -38,6 +38,20 @@ make smoke        # CI-only target — 3-row fixture
 make clean        # remove generated outputs
 ```
 
+## Summarization model
+
+The default model is **`sshleifer/distilbart-cnn-6-6`** — a distilled version of Facebook's BART encoder–decoder transformer, fine-tuned on the CNN/DailyMail abstractive summarization corpus. The `6-6` suffix denotes 6 encoder layers and 6 decoder layers, making it roughly half the size of BART-large-CNN while retaining strong news-summarization quality. The model weights (~250 MB) are downloaded from Hugging Face Hub on the first run and cached locally; no model file is committed to this repo. To use a different model, set the `SUMM_MODEL_FOR_CI` environment variable before running `make summarize`.
+
+## Corpus and re-run
+
+The evaluation runs over **120 tech/entertainment news articles** drawn from the `glnmario/news-qa-summarization` dataset (Module 6 corpus), stored in `data/tech_news_articles.csv`. Reference summaries are CNN editor-authored single-sentence ledes in `data/tech_news_summaries_reference.csv`. To reproduce the full evaluation from scratch:
+
+```bash
+make summarize
+```
+
+This generates `summary_predictions.csv` (120 rows with reference, predicted, and per-article ROUGE) and `summary_metrics.json` (aggregate ROUGE-1/2/L F1, article count, and model id).
+
 ## Submission
 
 Open a Pull Request from your working branch into `main`. The autograder runs `make smoke` against the 3-row fixture and validates artifact schemas. PR description requirements are in the integration guide.
