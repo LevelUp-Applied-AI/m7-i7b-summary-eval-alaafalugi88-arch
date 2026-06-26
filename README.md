@@ -63,3 +63,62 @@ Open a Pull Request from your working branch into `main`. The autograder runs `m
 This repository is provided for educational use only. See [LICENSE](LICENSE) for terms.
 
 You may clone and modify this repository for personal learning and practice, and reference code you wrote here in your professional portfolio. Redistribution outside this course is not permitted.
+
+
+
+## Summarization Evaluation (Integration 7B)
+
+We used the pre-trained summarization model **`sshleifer/distilbart-cnn-6-6`** (a distilled BART model fine-tuned on CNN/DailyMail news summarization dataset). This model was chosen as the baseline due to its good balance between quality and inference speed on CPU.
+
+**Corpus**: 120 tech and entertainment news articles from Module 6, paired with human-written reference summaries (`data/tech_news_summaries_reference.csv`).
+
+**Reproduce the full evaluation**:
+```bash
+make summarize
+
+This command runs the complete pipeline on all 120 articles and generates:
+
+summary_predictions.csv
+summary_metrics.json
+
+Tier 3 (Pareto Frontier): Run python model_comparison.py (or individually via python summarize.py --model <model_id>) to compare 4 models and generate model_comparison.csv + model_pareto.png.
+
+Model Comparison Results (Tier 3)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ModelROUGE-LMean Latency (s)Statusdistilbart-cnn-6-60.22414.80Pareto-optimalt5-small0.22415.22Dominateddistilbart-xsum-12-10.172116.31Dominateddistilbart-cnn-12-60.284613.93Pareto-optimal
+Best overall choice depends on the scenario: distilbart-cnn-6-6 for speed, distilbart-cnn-12-6 for maximum quality.
+text

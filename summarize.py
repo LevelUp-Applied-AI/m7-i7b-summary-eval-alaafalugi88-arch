@@ -1,14 +1,11 @@
 """
 Module 7 Week B — Integration Task: Summarization & Integrated Evaluation Report.
-
-Implement the functions below. See the integration guide for full task descriptions.
-
-The integrated evaluation report (`integrated-evaluation-report.md`) is the M7
-deliverable. Write it by hand based on the metrics produced by main().
 """
 
+import argparse
 import json
 import os
+import time
 
 import pandas as pd
 
@@ -41,12 +38,10 @@ def build_summarizer(model_name: str):
 
 
 def summarize_one(summ, text: str, max_length: int = 120, min_length: int = 30) -> str:
-    """
-    Summarize one document with deterministic beam search.
-
-    Use do_sample=False, num_beams=4. Return the summary STRING from
-    [0]["summary_text"].
-    """
+    """Summarize one document with deterministic beam search."""
+    # T5 models require a task prefix
+    if hasattr(summ, 'model') and 't5' in str(type(summ.model)).lower():
+        text = "summarize: " + text
     result = summ(
         text,
         max_length=max_length,
@@ -60,20 +55,14 @@ def summarize_one(summ, text: str, max_length: int = 120, min_length: int = 30) 
 # -- Task 2: ROUGE -----------------------------------------------------------
 
 def compute_rouge(pred: str, ref: str) -> dict:
-    """
-    Compute ROUGE-1, ROUGE-2, and ROUGE-L F1.
-
-    Use rouge_score.rouge_scorer.RougeScorer with use_stemmer=True.
-    Argument order: scorer.score(reference, predicted) — REFERENCE FIRST.
-
-    Returns {"rouge1": float, "rouge2": float, "rougeL": float}, all F1.
-    """
+    """Compute ROUGE-1, ROUGE-2, and ROUGE-L F1."""
     from rouge_score import rouge_scorer
+
     scorer = rouge_scorer.RougeScorer(
         ["rouge1", "rouge2", "rougeL"],
         use_stemmer=True,
     )
-    scores = scorer.score(ref, pred)
+    scores = scorer.score(ref, pred)  # reference first
     return {
         "rouge1": scores["rouge1"].fmeasure,
         "rouge2": scores["rouge2"].fmeasure,
@@ -84,34 +73,33 @@ def compute_rouge(pred: str, ref: str) -> dict:
 # -- Task 3: Evaluate over the corpus ----------------------------------------
 
 def evaluate_summaries(summ, articles_df: pd.DataFrame, refs_df: pd.DataFrame) -> dict:
-    """
-    Summarize each article and score against its reference.
-
-    Returns:
-        {
-          "rouge1": float, "rouge2": float, "rougeL": float,
-          "n": int,
-          "predictions": [
-            {article_id, reference_summary, predicted_summary, rouge1, rouge2, rougeL},
-            ...
-          ],
-        }
-
-    Joins articles_df and refs_df on article_id.
-    """
-    merged = pd.merge(articles_df, refs_df, on="article_id")
+    """Summarize each article and score against its reference."""
+    merged = articles_df.merge(refs_df, on="article_id")
 
     predictions = []
+    latencies = []
+
     for _, row in merged.iterrows():
-        predicted = summarize_one(summ, row["text"])
-        rouge = compute_rouge(predicted, row["reference_summary"])
+        article_id = row["article_id"]
+        text = row["text"]
+        reference_summary = row["reference_summary"]
+
+        # Timed summarization
+        t0 = time.time()
+        predicted_summary = summarize_one(summ, text)
+        latency = time.time() - t0
+        latencies.append(latency)
+
+        rouge_scores = compute_rouge(predicted_summary, reference_summary)
+
         predictions.append({
-            "article_id": str(row["article_id"]),
-            "reference_summary": row["reference_summary"],
-            "predicted_summary": predicted,
-            "rouge1": rouge["rouge1"],
-            "rouge2": rouge["rouge2"],
-            "rougeL": rouge["rougeL"],
+            "article_id": article_id,
+            "reference_summary": reference_summary,
+            "predicted_summary": predicted_summary,
+            "rouge1": rouge_scores["rouge1"],
+            "rouge2": rouge_scores["rouge2"],
+            "rougeL": rouge_scores["rougeL"],
+            "latency_sec": round(latency, 3),
         })
 
     n = len(predictions)
@@ -119,6 +107,7 @@ def evaluate_summaries(summ, articles_df: pd.DataFrame, refs_df: pd.DataFrame) -
         "rouge1": sum(p["rouge1"] for p in predictions) / n,
         "rouge2": sum(p["rouge2"] for p in predictions) / n,
         "rougeL": sum(p["rougeL"] for p in predictions) / n,
+        "mean_latency_sec": sum(latencies) / n,
         "n": n,
         "predictions": predictions,
     }
@@ -126,12 +115,20 @@ def evaluate_summaries(summ, articles_df: pd.DataFrame, refs_df: pd.DataFrame) -
 
 # -- Task 4: Orchestrate -----------------------------------------------------
 
-def main() -> None:
+def main(model_name: str = None) -> None:
     """Load data, build pipeline, evaluate, write artifacts."""
+    if model_name is None:
+        model_name = get_summarizer_model_name()
+
     articles_df = pd.read_csv(_articles_path())
     refs_df = pd.read_csv(_references_path())
 
-    summ = build_summarizer(get_summarizer_model_name())
+    print(f"Model: {model_name}")
+    summ = build_summarizer(model_name)
+
+    # Warm-up call to amortize model load from latency measurement
+    _ = summarize_one(summ, articles_df["text"].iloc[0])
+
     result = evaluate_summaries(summ, articles_df, refs_df)
 
     # Write predictions CSV
@@ -143,11 +140,12 @@ def main() -> None:
         "rouge1": result["rouge1"],
         "rouge2": result["rouge2"],
         "rougeL": result["rougeL"],
+        "mean_latency_sec": result["mean_latency_sec"],
         "n": result["n"],
-        "model": get_summarizer_model_name(),
+        "model": model_name,
     }
     metrics_path = _output_path().replace("predictions", "metrics").replace(".csv", ".json")
-    if metrics_path == _output_path():  # safety: ensure rename happened
+    if metrics_path == _output_path():
         metrics_path = "summary_metrics.json"
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2)
@@ -155,8 +153,13 @@ def main() -> None:
     print(f"ROUGE-1 = {result['rouge1']:.4f}")
     print(f"ROUGE-2 = {result['rouge2']:.4f}")
     print(f"ROUGE-L = {result['rougeL']:.4f}")
+    print(f"Mean latency = {result['mean_latency_sec']:.3f}s")
     print(f"n = {result['n']}")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, default=None,
+                        help="HuggingFace model id (default: sshleifer/distilbart-cnn-6-6)")
+    args = parser.parse_args()
+    main(model_name=args.model)
